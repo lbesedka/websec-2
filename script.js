@@ -8,6 +8,7 @@ let map = L.map('map').setView([53.195878, 50.100202], 13);
 let mapElem = document.querySelector('#map');
 let listElem = document.querySelector('.favorite-list');
 let markers = {};
+let stops = {};
 
 if (window.mobileCheck()) {
     mapElem.style.height = window.innerHeight * 0.8 + 'px';
@@ -45,6 +46,7 @@ function getArrivals(KS_ID) {
 }
 
 function generatePopupInfo(vehicles, stop) {
+    console.log(vehicles);
     let resultInfo = {
         trolleybuses: [],
         buses: [],
@@ -57,18 +59,21 @@ function generatePopupInfo(vehicles, stop) {
             case "Автобус":
                 resultInfo.buses.push({
                     number: vehicle.number,
-                    time: vehicle.time
+                    time: vehicle.time,
+                    hullNo: vehicle.hullNo
                 });
                 break;
             case "Троллейбус":
                 resultInfo.trolleybuses.push({
                     number: vehicle.number,
-                    time: vehicle.time
+                    time: vehicle.time,
+                    hullNo: vehicle.hullNo
                 });
             case "Трамвай":
                 resultInfo.trams.push({
                     number: vehicle.number,
-                    time: vehicle.time
+                    time: vehicle.time,
+                    hullNo: vehicle.hullNo
                 });
             default:
                 break;
@@ -85,7 +90,7 @@ function generatePopupInfo(vehicles, stop) {
         resultHTML += "<div class='popup_buses'><p>Автобусы:</p>";
         for (let i of resultInfo.buses) {
             resultHTML += "<div class='popup_buses__bus-info'>";
-            resultHTML += `<span>Автобус ${i.number}</span>`;
+            resultHTML += `<span onclick="generateNextStops(${i.hullNo})">Автобус ${i.number}</span>`;
             resultHTML += i.time === "0" ? "<span>Прибывает</span>" : `<span>${i.time} мин.</span>`;
             resultHTML += "</div>";
         }
@@ -95,7 +100,7 @@ function generatePopupInfo(vehicles, stop) {
         resultHTML += "<div class='popup_trams'><p>Трамваи:</p>";
         for (let i of resultInfo.trams) {
             resultHTML += "<div class='popup_trams__tram-info'>";
-            resultHTML += `<span>Трамвай ${i.number}</span>`;
+            resultHTML += `<span onclick="generateNextStops(${i.hullNo})">Трамвай ${i.number}</span>`;
             resultHTML += i.time === "0" ? "<span>Прибывает</span>" : `<span>${i.time} мин.</span>`;
             resultHTML += "</div>";
         }
@@ -105,7 +110,7 @@ function generatePopupInfo(vehicles, stop) {
         resultHTML += "<div class='popup_trolls'><p>Троллейбусы:</p>";
         for (let i of resultInfo.trolleybuses) {
             resultHTML += "<div class='popup_trolls__troll-info'>";
-            resultHTML += `<span>Троллейбус ${i.number}</span>`;
+            resultHTML += `<span onclick="generateNextStops(${i.hullNo})">Троллейбус ${i.number}</span>`;
             resultHTML += i.time === "0" ? "<span>Прибывает</span>" : `<span>${i.time} мин.</span>`;
             resultHTML += "</div>";
         }
@@ -115,6 +120,31 @@ function generatePopupInfo(vehicles, stop) {
 
     // console.log(resultInfo);
     return resultHTML;
+}
+
+function generateNextStops(hullNo) {
+    listElem.innerHTML = "<button onclick='renderFavoriteList()'>Назад</button>";
+    if (listElem.style.display === "none") {
+        toggleFavoriteList();
+    }
+    fetch(`https://tosamara.ru/api/v2/json?method=getTransportPosition&HULLNO=${hullNo}&os=android&clientid=test&authkey=${SHA1(hullNo + "just_f0r_tests")}`)
+        .then(response => response.json())
+        .then(res => {
+            for (let stop of res.nextStops) {
+                const newItem = document.createElement('div');
+                newItem.innerHTML = `
+                    <div class="favorite-list__item">
+                        <b class="favorite-list__item_title">${stops[stop.KS_ID].name}</b>
+                        <p class="favorite-list__item_info">${Math.round(+stop.time / 60) !== 0 ? 'Через ' + Math.round(+stop.time / 60) + " мин." : "Прибывает"}</p>
+                    </div>
+                `;
+                listElem.appendChild(newItem);
+                newItem.addEventListener('click', () => {
+                    markers[stop.KS_ID].openPopup();
+                    map.setView([stop.x, stop.y], 13);
+                });
+            }
+        });
 }
 
 function addToFavorite(elem, stop, vehicles) {
@@ -151,7 +181,8 @@ function addToFavorite(elem, stop, vehicles) {
 
 function renderFavoriteList() {
     let favoriteStops = JSON.parse(localStorage.getItem('favorite')) || [];
-    listElem.innerHTML = "<h3>Избранное: </h3>";
+    listElem.innerHTML = "<button onclick='toggleSearch()'>Поиск по всем</button>"
+    listElem.innerHTML += "<h3>Избранное: </h3>";
     if (!favoriteStops.length) {
         listElem.innerHTML = "<h3>Пусто</h3>";
         return;
@@ -173,6 +204,34 @@ function renderFavoriteList() {
     }
 }
 
+function toggleSearch() {
+    listElem.innerHTML = "<button onclick='renderFavoriteList()' style='margin-right: 10px;'>Назад</button>";
+    listElem.innerHTML += "<input id=\"search-input\" type=\"text\" placeholder=\"Поиск...\" list=\"search-list\">";
+    listElem.innerHTML += "<div id='found-stops' style='display: flex; flex-direction: column; margin-top: 30px;'></div>";
+    let foundList = document.querySelector("#found-stops");
+    let searchField = document.querySelector("#search-input");
+    console.log(stops);
+    searchField.addEventListener("input", () => {
+        if (searchField.value < 4) return;
+        foundList.innerHTML = "";
+        for (const [key, value] of Object.entries(stops)) {
+            if (value["name"].toLowerCase().includes(searchField.value.toLowerCase())) {
+                const newItem = document.createElement('div');
+                newItem.innerHTML = `
+                    <div class="favorite-list__item">
+                        <b class="favorite-list__item_title">${value["name"]}</b>
+                    </div>
+			    `;
+                foundList.appendChild(newItem);
+                newItem.addEventListener('click', () => {
+                    markers[key].openPopup();
+                    map.setView([value.x, value.y], 13);
+                });
+            }
+        }
+    })
+}
+
 function renderStops(data) {
     console.log(data["stops"].stop[1]);
     console.log(data["stops"].stop[2]);
@@ -180,7 +239,8 @@ function renderStops(data) {
 
     console.log(data["stops"].stop[1].busesSeason["#text"]);
     console.log(data["stops"].stop[1].busesPrigorod["#text"]);
-    //data["stops"].stop = data["stops"].stop.slice(0, 100);
+    // data["stops"].stop = data["stops"].stop.slice(0, 100);
+    let dataList = document.querySelector("#search-list");
     for (let i of data["stops"].stop) {
         let marker = L.marker([i.latitude["#text"], i.longitude["#text"]]).addTo(map).bindPopup();
         marker.addEventListener("popupopen", async () => {
@@ -188,6 +248,14 @@ function renderStops(data) {
             marker.bindPopup(arrivalsInfo);
         })
         markers[i.KS_ID["#text"]] = marker;
+        stops[i.KS_ID["#text"]] = {
+            name: i.title["#text"],
+            x: i.latitude["#text"],
+            y: i.longitude["#text"]
+        };
+        let stop = document.createElement("option");
+        stop.value = i.title["#text"];
+        dataList.appendChild(stop);
     }
     renderFavoriteList();
 }
